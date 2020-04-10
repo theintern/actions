@@ -1,67 +1,66 @@
 # action-project-manager
 
-This is relatively simple a GitHub Action that can be used to manage issues in a project.
+This is a GitHub Action that can be used to manage issues in a project.
 
 ## Usage
 
-This action is meant to be a building block for more complex behaviors. The basic idea is that when some issue-related event happens, this action can be used to move the affected issue to a particular column in a project.
-
 ```yaml
-# .github/workflows/issue-created.yaml
-name: Issue Created
+# .github/workflows/update-issue.yaml
+name: Update issue
 
 on:
   issues:
-    types: [opened]
+  pull_request: [opened, closed, reopened]
 
 jobs:
-  move-issue:
+  update-issue:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
       - uses: theintern/action-project-manager@v0.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           project: Development
-          column: Done
+          auto-add: true
+          triage-column: Triage
+          triage-label: needs-triage
+          todo-column: To do
+          working-column: In progress
+          done-column: Done
 ```
 
-```yaml
-# .github/workflows/issue-assigned.yaml
-name: Issue Assigned
+## Configuration
 
-on:
-  issues:
-    types: [assigned]
+| Property         | Required | Value                                                       |
+| ---------------- | -------- | ----------------------------------------------------------- |
+| `github-token`   | Yes      | A GitHub API token (`GITHUB_TOKEN` is available by default) |
+| `project`        | Yes      | The project being managed                                   |
+| `auto-add`       | No       | If true, all new issues are added to the project            |
+| `triage-column`  | No       | Column name for new, unassigned issues                      |
+| `triage-label`   | No       | Label to apply to new issues                                |
+| `todo-column`    | No       | Column name for triaged issues                              |
+| `working-column` | No       | Column name for in-progress issues                          |
+| `done-column`    | No       | Column name for completed issues                            |
 
-jobs:
-  move-issue:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: theintern/action-project-manager@v0.1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          project: Development
-          column: In progress
-```
+## How it works
 
-```yaml
-# .github/workflows/issue-completed.yaml
-name: Issue Completed
+Only issues should be added to a project, not PRs. Linked PRs are accessible
+through the issue cards.
 
-on:
-  issues:
-    types: [closed]
+Note that any rule below that mentions an optional config property will only be
+executed if that property is defined.
 
-jobs:
-  move-issue:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: theintern/action-project-manager@v0.1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          project: Development
-          column: Done
-```
+Rules:
+
+- If `auto-add` is true, new issues will be added to `triage-column` and have
+  `triage-label` set
+- Issues in `triage-column` will be moved to `todo-column` when `triage-label`
+  is removed
+- Issues that are in `todo-column` or `triage-column` will be moved to
+  `working-column` when they are assigned
+- When a PR is opened that links to an issue in `triage-column` or
+  `todo-column`, that issue will be moved to `working-column`
+- An issue in `working-column` that is unassigned with be moved to
+  `todo-columnn`
+- Closed issues are moved to `done-column`
+- Re-opened issues are moved to `working-column` if they are assigned, or to
+  `todo-column` if not

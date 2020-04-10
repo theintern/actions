@@ -1928,7 +1928,7 @@ class Issue {
       }
     `;
             const response = yield this.octokit.graphql(query);
-            const resource = response["resource"];
+            const resource = response['resource'];
             const cards = (_a = resource.projectCards.nodes) !== null && _a !== void 0 ? _a : [];
             // Project columns must exist, because this action only makes sense with a
             // valid project
@@ -4422,25 +4422,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/**
- * Actions
- *
- * - New issues will have the "triage" label auto-assigned (if one is configured)
- * - Issues with the "triage" label will be added to the Triage column (if one
- *   is configured)
- * - Issues in the triage column will be moved to todo when the triage label is removed
- * - Newly assigned issues that are in todo or triage go to the working column
- * - todo issues that are assigned go to the working column
- * - When a PR is opened that links to an issue, that issue will be moved to
- *   the working column
- * - working issues that are de-assigned go back to todo
- * - Issues that are on the board and are closed go to done
- * - Closed issues on the board that are re-opened go back to working
- * - When issues are added to a column, they should be added in priority order,
- *   with priority-high at the top and priority-low at the bottom.
- * - Only issues go on the board, not PRs. PRs will be accessible through issue
- *   links.
- */
 const core_1 = __webpack_require__(470);
 const github_1 = __webpack_require__(469);
 const issue_1 = __webpack_require__(163);
@@ -4586,7 +4567,7 @@ function main() {
                             issue.isInColumn(config.workingColumnName) &&
                             config.todoColumnName &&
                             !issue.isAssigned() &&
-                            !issue.linkedPrs.some(pr => !pr.closed)) {
+                            !issue.linkedPrs.some((pr) => !pr.closed)) {
                             core_1.info(`Moving issue ${issue.number} to todo column`);
                             yield issue.moveToColumn(config.todoColumnName);
                         }
@@ -25873,7 +25854,6 @@ function getAction(context) {
 }
 exports.getAction = getAction;
 function getConfig() {
-    const triagedLabels = core_1.getInput('triaged-labels');
     const config = {
         token: core_1.getInput('github-token'),
         projectName: core_1.getInput('project'),
@@ -25883,8 +25863,6 @@ function getConfig() {
         triageColumnName: core_1.getInput('triage-column'),
         // Label that will be applied to triage issues
         triageLabel: core_1.getInput('triage-label'),
-        // Labels that indicate an issue has been triaged
-        triagedLabels: triagedLabels ? triagedLabels.split(/\s*,\s*/) : null,
         // Column for "ready" issues
         todoColumnName: core_1.getInput('todo-column'),
         // Column for "in-progress" issues
