@@ -296,9 +296,9 @@ module.exports = require("tls");
 /***/ }),
 
 /***/ 18:
-/***/ (function() {
+/***/ (function(module) {
 
-eval("require")("encoding");
+module.exports = eval("require")("encoding");
 
 
 /***/ }),
@@ -388,6 +388,13 @@ module.exports._enoent = enoent;
 
 /***/ }),
 
+/***/ 34:
+/***/ (function(module) {
+
+module.exports = require("https");
+
+/***/ }),
+
 /***/ 39:
 /***/ (function(module) {
 
@@ -458,13 +465,21 @@ const windowsRelease = release => {
 
 	const ver = (version || [])[0];
 
-	// Server 2008, 2012 and 2016 versions are ambiguous with desktop versions and must be detected at runtime.
+	// Server 2008, 2012, 2016, and 2019 versions are ambiguous with desktop versions and must be detected at runtime.
 	// If `release` is omitted or we're on a Windows system, and the version number is an ambiguous version
 	// then use `wmic` to get the OS caption: https://msdn.microsoft.com/en-us/library/aa394531(v=vs.85).aspx
-	// If the resulting caption contains the year 2008, 2012 or 2016, it is a server version, so return a server OS name.
+	// If `wmic` is obsoloete (later versions of Windows 10), use PowerShell instead.
+	// If the resulting caption contains the year 2008, 2012, 2016 or 2019, it is a server version, so return a server OS name.
 	if ((!release || release === os.release()) && ['6.1', '6.2', '6.3', '10.0'].includes(ver)) {
-		const stdout = execa.sync('wmic', ['os', 'get', 'Caption']).stdout || '';
-		const year = (stdout.match(/2008|2012|2016/) || [])[0];
+		let stdout;
+		try {
+			stdout = execa.sync('powershell', ['(Get-CimInstance -ClassName Win32_OperatingSystem).caption']).stdout || '';
+		} catch (_) {
+			stdout = execa.sync('wmic', ['os', 'get', 'Caption']).stdout || '';
+		}
+
+		const year = (stdout.match(/2008|2012|2016|2019/) || [])[0];
+
 		if (year) {
 			return `Server ${year}`;
 		}
@@ -1444,7 +1459,7 @@ module.exports = require("child_process");
 var net = __webpack_require__(631);
 var tls = __webpack_require__(16);
 var http = __webpack_require__(605);
-var https = __webpack_require__(211);
+var https = __webpack_require__(34);
 var events = __webpack_require__(614);
 var assert = __webpack_require__(357);
 var util = __webpack_require__(669);
@@ -1809,6 +1824,249 @@ function paginatePlugin(octokit) {
 
 /***/ }),
 
+/***/ 163:
+/***/ (function(__unusedmodule, exports) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+class Issue {
+    constructor(octokit, url, projectName) {
+        this.octokit = octokit;
+        this.url = url;
+        this.projectName = projectName;
+        this.id = '';
+        this.number = 0;
+        this.labels = [];
+        this.assignees = [];
+        this.projectColumns = [];
+        this.repoLabels = [];
+        this.linkedPrs = [];
+    }
+    /**
+     * Load data for an issue and its containing project and repo
+     */
+    load() {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            const query = `
+      {
+        resource(url: "${this.url}") {
+          ... on Issue {
+            id
+            number
+            timelineItems(first: 50, itemTypes: CROSS_REFERENCED_EVENT) {
+              nodes {
+                ... on CrossReferencedEvent {
+                  willCloseTarget
+                  source {
+                    ... on PullRequest {
+                      id
+                      number
+                      closed
+                    }
+                  }
+                }
+              }
+            }
+            assignees(first: 1) {
+              nodes {
+                name
+                id
+              }
+            }
+            labels(first: 10) {
+              nodes {
+                name
+                id
+              }
+            }
+            projectCards {
+              nodes {
+                id
+                column {
+                  name
+                  id
+                }
+                project {
+                  name
+                  id
+                }
+              }
+            },
+            repository {
+              projects(search: "${this.projectName}", first: 10, states: [OPEN]) {
+                nodes {
+                  name
+                  id
+                  columns(first: 10) {
+                    nodes {
+                      id
+                      name
+                    }
+                  }
+                }
+              }
+              labels(first: 50) {
+                nodes {
+                  name
+                  id
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+            const response = yield this.octokit.graphql(query);
+            const resource = response["resource"];
+            const cards = (_a = resource.projectCards.nodes) !== null && _a !== void 0 ? _a : [];
+            // Project columns must exist, because this action only makes sense with a
+            // valid project
+            this.projectColumns = resource.repository.projects.nodes[0].columns.nodes;
+            // Issue card may not exist
+            this.projectCard = cards.find((card) => card.project.name === this.projectName);
+            this.repoLabels = resource.repository.labels.nodes;
+            this.assignees = resource.assignees.nodes;
+            this.id = resource.id;
+            this.number = resource.number;
+            this.labels = resource.labels.nodes;
+            this.linkedPrs = resource.timelineItems.nodes.map((node) => (Object.assign({ willCloseIssue: node.willCloseTarget }, node.source)));
+        });
+    }
+    /**
+     * Add this issue to a particular column in its project
+     */
+    moveToColumn(toColumn) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const column = typeof toColumn === 'string' ? this.getColumn(toColumn) : toColumn;
+            if (!column) {
+                throw new Error(`Invalid column "${toColumn}"`);
+            }
+            const contentId = this.id;
+            const query = this.projectCard
+                ? `
+      mutation {
+        moveProjectCard(input: {
+          cardId: "${this.projectCard.id}",
+          columnId: "${column.id}"
+        }) { clientMutationId }
+      }
+    `
+                : `
+      mutation {
+        addProjectCard(input: {
+          contentId: "${contentId}",
+          projectColumnId: "${column.id}"
+        }) { clientMutationId }
+      }
+    `;
+            yield this.octokit.graphql(query);
+        });
+    }
+    /**
+     * Add a label to this issue
+     */
+    addLabel(toAdd) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const label = typeof toAdd === 'string' ? this.getLabel(toAdd) : toAdd;
+            if (!label) {
+                throw new Error(`Invalid label "${toAdd}"`);
+            }
+            if (this.hasLabel(label.name)) {
+                return;
+            }
+            const query = `
+      mutation {
+        addLabelsToLabelable(input: {
+          labelIds: ["${label.id}"],
+          labelableId: "${this.id}"
+        }) { clientMutationId }
+      }
+    `;
+            yield this.octokit.graphql(query);
+        });
+    }
+    /**
+     * Indicate whether this issue already has a given label
+     */
+    hasLabel(label) {
+        return this.labels.some((lbl) => lbl.name === label);
+    }
+    /**
+     * Indicate whether this issue is assigned
+     */
+    isAssigned() {
+        return this.assignees && this.assignees.length > 0;
+    }
+    /**
+     * Indicate whether this issue is in the given column
+     */
+    isInColumn(column) {
+        const col = typeof column === 'string' ? this.getColumn(column) : column;
+        if (!col || !this.projectCard) {
+            return false;
+        }
+        return this.projectCard.column.id === col.id;
+    }
+    /**
+     * Remove a label from this issue
+     */
+    removeLabel(toRemove) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const label = typeof toRemove === 'string' ? this.getLabel(toRemove) : toRemove;
+            if (!label) {
+                throw new Error(`Invalid label "${toRemove}"`);
+            }
+            if (!this.hasLabel(label.name)) {
+                return;
+            }
+            const query = `
+      mutation {
+        removeLabelsFromLabelable(input: {
+          labelIds: ["${label.id}"],
+          labelableId: "${this.id}"
+        }) { clientMutationId }
+      }
+    `;
+            yield this.octokit.graphql(query);
+        });
+    }
+    /**
+     * Get a column from this issue's project
+     */
+    getColumn(label) {
+        return this.projectColumns.find((col) => col.name === label);
+    }
+    /**
+     * Get a label from this issue's repository
+     */
+    getLabel(label) {
+        return this.repoLabels.find((lbl) => lbl.name === label);
+    }
+}
+exports.Issue = Issue;
+function loadIssue(octokit, url, projectName) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const issue = new Issue(octokit, url, projectName);
+        yield issue.load();
+        return issue;
+    });
+}
+exports.loadIssue = loadIssue;
+
+
+/***/ }),
+
 /***/ 168:
 /***/ (function(module) {
 
@@ -1990,9 +2248,32 @@ function checkMode (stat, options) {
 /***/ }),
 
 /***/ 211:
-/***/ (function(module) {
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
 
-module.exports = require("https");
+"use strict";
+
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var osName = _interopDefault(__webpack_require__(2));
+
+function getUserAgent() {
+  try {
+    return `Node.js/${process.version.substr(1)} (${osName()}; ${process.arch})`;
+  } catch (error) {
+    if (/wmic os get Caption/.test(error.message)) {
+      return "Windows <version undetectable>";
+    }
+
+    return "<environment undetectable>";
+  }
+}
+
+exports.getUserAgent = getUserAgent;
+//# sourceMappingURL=index.js.map
+
 
 /***/ }),
 
@@ -2011,6 +2292,7 @@ module.exports = {"name":"@octokit/rest","version":"16.43.1","publishConfig":{"a
 // ignored, since we can never get coverage for them.
 var assert = __webpack_require__(357)
 var signals = __webpack_require__(654)
+var isWin = /^win/i.test(process.platform)
 
 var EE = __webpack_require__(614)
 /* istanbul ignore if */
@@ -2100,6 +2382,11 @@ signals.forEach(function (sig) {
       /* istanbul ignore next */
       emit('afterexit', null, sig)
       /* istanbul ignore next */
+      if (isWin && sig === 'SIGHUP') {
+        // "SIGHUP" throws an `ENOSYS` error on Windows,
+        // so use a supported signal instead
+        sig = 'SIGINT'
+      }
       process.kill(process.pid, sig)
     }
   }
@@ -3760,7 +4047,7 @@ function coerce (version) {
 
 module.exports = authenticationRequestError;
 
-const { RequestError } = __webpack_require__(463);
+const { RequestError } = __webpack_require__(497);
 
 function authenticationRequestError(state, error, options) {
   if (!error.headers) throw error;
@@ -4135,67 +4422,181 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const core = __webpack_require__(470);
-const github = __webpack_require__(469);
-(function main() {
+/**
+ * Actions
+ *
+ * - New issues will have the "triage" label auto-assigned (if one is configured)
+ * - Issues with the "triage" label will be added to the Triage column (if one
+ *   is configured)
+ * - Issues in the triage column will be moved to todo when the triage label is removed
+ * - Newly assigned issues that are in todo or triage go to the working column
+ * - todo issues that are assigned go to the working column
+ * - When a PR is opened that links to an issue, that issue will be moved to
+ *   the working column
+ * - working issues that are de-assigned go back to todo
+ * - Issues that are on the board and are closed go to done
+ * - Closed issues on the board that are re-opened go back to working
+ * - When issues are added to a column, they should be added in priority order,
+ *   with priority-high at the top and priority-low at the bottom.
+ * - Only issues go on the board, not PRs. PRs will be accessible through issue
+ *   links.
+ */
+const core_1 = __webpack_require__(470);
+const github_1 = __webpack_require__(469);
+const issue_1 = __webpack_require__(163);
+const pr_1 = __webpack_require__(961);
+const types_1 = __webpack_require__(639);
+const init_1 = __webpack_require__(967);
+function main() {
     return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const token = core.getInput('github-token');
-            const projectName = core.getInput('project');
-            const columnName = core.getInput('column');
-            const octokit = (new github.GitHub(token));
-            const issueInfo = github.context.issue;
-            // Find the project specified by the user
-            const projects = yield octokit.paginate(octokit.projects.listForRepo.endpoint.merge({
-                owner: 'jason0x43',
-                repo: 'hacs-hubitat'
-            }));
-            const project = projects.find(proj => proj.name.toLowerCase() === projectName.toLowerCase());
-            // Find the column specified by the user
-            const columns = yield octokit.paginate(octokit.projects.listColumns.endpoint.merge({
-                project_id: project.id
-            }));
-            const column = columns.find(col => col.name.toLowerCase() === columnName.toLowerCase());
-            // Check for an existing card for the issue
-            let existing;
-            const issueTest = new RegExp(`/issues/${issueInfo.number}$`);
-            for (const col of columns) {
-                const cards = yield octokit.paginate(octokit.projects.listCards.endpoint.merge({
-                    column_id: col.id
-                }));
-                const card = cards.find(card => issueTest.test(card.content_url));
-                if (card) {
-                    existing = card;
-                    break;
+        const actionInfo = init_1.getAction(github_1.context);
+        if (!actionInfo.action) {
+            core_1.info(`Skipping event ${event}`);
+            return;
+        }
+        const config = init_1.getConfig();
+        const octokit = new github_1.GitHub(config.token);
+        const { projectName } = config;
+        if (actionInfo.actionType === types_1.ActionType.Issue) {
+            core_1.info(`Processing an issue event: ${github_1.context.payload.action}`);
+            const issue = yield issue_1.loadIssue(octokit, github_1.context.payload.issue.html_url, projectName);
+            if (issue.projectCard || config.autoAdd) {
+                switch (actionInfo.action) {
+                    case types_1.Action.IssueOpened:
+                        core_1.info(`Issue ${issue.number} was opened`);
+                        if (issue.isAssigned()) {
+                            core_1.info(`Issue ${issue.number} is assigned`);
+                            if (config.workingColumnName) {
+                                // If the issue is already assigned, move it to the working column
+                                core_1.info(`Moving issue ${issue.number} to working column`);
+                                yield issue.moveToColumn(config.workingColumnName);
+                            }
+                        }
+                        else {
+                            core_1.info(`Issue ${issue.number} is not assigned`);
+                            // If we have a triage label, apply it to new issues
+                            if (config.triageLabel) {
+                                core_1.info(`Adding triage label to ${issue.number}`);
+                                yield issue.addLabel(config.triageLabel);
+                            }
+                            // If we have a triage column, put new issues in it
+                            if (config.triageColumnName) {
+                                core_1.info(`Moving issue ${issue.number} to triage column`);
+                                yield issue.moveToColumn(config.triageColumnName);
+                            }
+                        }
+                        break;
+                    case types_1.Action.IssueClosed:
+                        core_1.info(`Issue ${issue.number} was closed`);
+                        // If an issue is closed, it's done
+                        if (config.doneColumnName) {
+                            core_1.info(`Moving issue ${issue.number} to done column`);
+                            yield issue.moveToColumn(config.doneColumnName);
+                        }
+                        break;
+                    case types_1.Action.IssueReopened:
+                        core_1.info(`Issue ${issue.number} was reopened`);
+                        // If an issue is reopened and is assigned, it's in progress, otherwise
+                        // it's todo
+                        if (issue.isAssigned() && config.workingColumnName) {
+                            core_1.info(`Issue ${issue.number} is assigned; moving to working column`);
+                            yield issue.moveToColumn(config.workingColumnName);
+                        }
+                        else if (!issue.isAssigned() && config.todoColumnName) {
+                            core_1.info(`Issue ${issue.number} is not assigned; moving to todo column`);
+                            yield issue.moveToColumn(config.todoColumnName);
+                        }
+                        break;
+                    case types_1.Action.IssueAssignment:
+                        core_1.info(`Issue ${issue.number} was assigned`);
+                        // If a triaged or todo issue is assigned, it's in progress
+                        if (issue.isAssigned() && config.workingColumnName) {
+                            if ((config.todoColumnName &&
+                                issue.isInColumn(config.todoColumnName)) ||
+                                (config.triageColumnName &&
+                                    issue.isInColumn(config.triageColumnName))) {
+                                core_1.info(`Moving issue ${issue.number} to working column`);
+                                yield issue.moveToColumn(config.workingColumnName);
+                                if (config.triageLabel && issue.hasLabel(config.triageLabel)) {
+                                    core_1.info(`Removing triage label from issue ${issue.number}`);
+                                    yield issue.removeLabel(config.triageLabel);
+                                }
+                            }
+                        }
+                        else if (!issue.isAssigned() && config.todoColumnName) {
+                            core_1.info(`Issue ${issue.number} is not assigned`);
+                            if (config.workingColumnName &&
+                                issue.isInColumn(config.workingColumnName)) {
+                                core_1.info(`Moving ${issue.number} to todo column`);
+                                yield issue.moveToColumn(config.todoColumnName);
+                            }
+                        }
+                        break;
+                    case types_1.Action.IssueLabeling:
+                        core_1.info(`Issue ${issue.number} was relabeled`);
+                        if (config.triageLabel) {
+                            if (issue.hasLabel(config.triageLabel)) {
+                                if (config.triageColumnName &&
+                                    !issue.isInColumn(config.triageColumnName)) {
+                                    core_1.info(`Moving ${issue.number} to triage column`);
+                                    yield issue.moveToColumn(config.triageColumnName);
+                                }
+                            }
+                            else {
+                                if (config.todoColumnName &&
+                                    !issue.isInColumn(config.todoColumnName)) {
+                                    core_1.info(`Moving ${issue.number} to todo column`);
+                                    yield issue.moveToColumn(config.todoColumnName);
+                                }
+                            }
+                        }
+                        break;
                 }
             }
-            if (existing) {
-                // A card already exists -- move it
-                yield octokit.projects.moveCard({
-                    card_id: existing.id,
-                    column_id: column.id,
-                    position: 'top'
-                });
-            }
-            else {
-                const issue = (yield octokit.issues.get({
-                    owner: issueInfo.owner,
-                    repo: issueInfo.repo,
-                    issue_number: issueInfo.number
-                })).data;
-                // A card doesn't exist -- create it
-                yield octokit.projects.createCard({
-                    column_id: column.id,
-                    content_id: issue.id,
-                    content_type: 'Issue'
-                });
-            }
         }
-        catch (error) {
-            console.error(error);
+        else {
+            core_1.info(`Processing a PR event: ${github_1.context.payload.action}`);
+            const pr = yield pr_1.loadPr(octokit, github_1.context.payload.pull_request.html_url);
+            const linkedIssues = yield pr.findLinkedIssues(projectName);
+            switch (actionInfo.action) {
+                case types_1.Action.PrOpened:
+                    core_1.info(`PR ${pr.number} was opened`);
+                    for (const issue of linkedIssues) {
+                        core_1.info(`Checking referenced issue ${issue.number}`);
+                        if ((config.todoColumnName &&
+                            issue.isInColumn(config.todoColumnName)) ||
+                            (config.triageColumnName &&
+                                issue.isInColumn(config.triageColumnName))) {
+                            if (config.workingColumnName) {
+                                core_1.info(`Moving issue ${issue.number} to working column`);
+                                yield issue.moveToColumn(config.workingColumnName);
+                            }
+                            if (config.triageLabel && issue.hasLabel(config.triageLabel)) {
+                                core_1.info(`Removing triage label from ${issue.number}`);
+                                yield issue.removeLabel(config.triageLabel);
+                            }
+                        }
+                    }
+                    break;
+                case types_1.Action.PrClosed:
+                    core_1.info(`PR ${pr.number} was closed`);
+                    for (const issue of linkedIssues) {
+                        core_1.info(`Checking referenced issue ${issue.number}`);
+                        if (config.workingColumnName &&
+                            issue.isInColumn(config.workingColumnName) &&
+                            config.todoColumnName &&
+                            !issue.isAssigned() &&
+                            !issue.linkedPrs.some(pr => !pr.closed)) {
+                            core_1.info(`Moving issue ${issue.number} to todo column`);
+                            yield issue.moveToColumn(config.todoColumnName);
+                        }
+                    }
+                    break;
+            }
         }
     });
-})();
+}
+main().catch((error) => console.error(error));
 
 
 /***/ }),
@@ -4224,7 +4625,7 @@ function hasLastPage (link) {
 
 module.exports = validate;
 
-const { RequestError } = __webpack_require__(463);
+const { RequestError } = __webpack_require__(497);
 const get = __webpack_require__(854);
 const set = __webpack_require__(883);
 
@@ -4380,7 +4781,7 @@ function validate(octokit, options) {
 
 module.exports = authenticationRequestError;
 
-const { RequestError } = __webpack_require__(463);
+const { RequestError } = __webpack_require__(497);
 
 function authenticationRequestError(state, error, options) {
   /* istanbul ignore next */
@@ -4519,7 +4920,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
 function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
 
 var isPlainObject = _interopDefault(__webpack_require__(696));
-var universalUserAgent = __webpack_require__(796);
+var universalUserAgent = __webpack_require__(562);
 
 function lowercaseKeys(object) {
   if (!object) {
@@ -4869,7 +5270,7 @@ function withDefaults(oldDefaults, newDefaults) {
   });
 }
 
-const VERSION = "5.5.2";
+const VERSION = "6.0.0";
 
 const userAgent = `octokit-endpoint.js/${VERSION} ${universalUserAgent.getUserAgent()}`; // DEFAULTS has all properties set that EndpointOptions has, except url.
 // So we use RequestParameters and add method as additional required property.
@@ -5226,7 +5627,7 @@ function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'defau
 var Stream = _interopDefault(__webpack_require__(413));
 var http = _interopDefault(__webpack_require__(605));
 var Url = _interopDefault(__webpack_require__(835));
-var https = _interopDefault(__webpack_require__(211));
+var https = _interopDefault(__webpack_require__(34));
 var zlib = _interopDefault(__webpack_require__(761));
 
 // Based on https://github.com/tmpvar/jsdom/blob/aa85b2abf07766ff7bf5c1f6daafb3726f2f2db5/lib/jsdom/living/blob.js
@@ -6984,9 +7385,6 @@ exports.RequestError = RequestError;
 
 "use strict";
 
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -6997,13 +7395,13 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 // Originally pulled from https://github.com/JasonEtco/actions-toolkit/blob/master/src/github.ts
 const graphql_1 = __webpack_require__(898);
-const rest_1 = __importDefault(__webpack_require__(0));
+const rest_1 = __webpack_require__(0);
 const Context = __importStar(__webpack_require__(262));
 const httpClient = __importStar(__webpack_require__(539));
 // We need this in order to extend Octokit
-rest_1.default.prototype = new rest_1.default();
+rest_1.Octokit.prototype = new rest_1.Octokit();
 exports.context = new Context.Context();
-class GitHub extends rest_1.default {
+class GitHub extends rest_1.Octokit {
     constructor(token, opts) {
         super(GitHub.getOctokitOptions(GitHub.disambiguate(token, opts)));
         this.graphql = GitHub.getGraphQL(GitHub.disambiguate(token, opts));
@@ -7190,6 +7588,13 @@ exports.setFailed = setFailed;
 //-----------------------------------------------------------------------
 // Logging Commands
 //-----------------------------------------------------------------------
+/**
+ * Gets whether Actions Step Debug is on or not
+ */
+function isDebug() {
+    return process.env['RUNNER_DEBUG'] === '1';
+}
+exports.isDebug = isDebug;
 /**
  * Writes debug message to user log
  * @param message debug message
@@ -7394,6 +7799,69 @@ module.exports = resolveCommand;
 
 /***/ }),
 
+/***/ 497:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var deprecation = __webpack_require__(692);
+var once = _interopDefault(__webpack_require__(969));
+
+const logOnce = once(deprecation => console.warn(deprecation));
+/**
+ * Error with extra properties to help with debugging
+ */
+
+class RequestError extends Error {
+  constructor(message, statusCode, options) {
+    super(message); // Maintains proper stack trace (only available on V8)
+
+    /* istanbul ignore next */
+
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+
+    this.name = "HttpError";
+    this.status = statusCode;
+    Object.defineProperty(this, "code", {
+      get() {
+        logOnce(new deprecation.Deprecation("[@octokit/request-error] `error.code` is deprecated, use `error.status`."));
+        return statusCode;
+      }
+
+    });
+    this.headers = options.headers || {}; // redact request credentials without mutating original request options
+
+    const requestCopy = Object.assign({}, options.request);
+
+    if (options.request.headers.authorization) {
+      requestCopy.headers = Object.assign({}, options.request.headers, {
+        authorization: options.request.headers.authorization.replace(/ .*$/, " [REDACTED]")
+      });
+    }
+
+    requestCopy.url = requestCopy.url // client_id & client_secret can be passed as URL query parameters to increase rate limit
+    // see https://developer.github.com/v3/#increasing-the-unauthenticated-rate-limit-for-oauth-applications
+    .replace(/\bclient_secret=\w+/g, "client_secret=[REDACTED]") // OAuth tokens can be passed as URL query parameters, although it is not recommended
+    // see https://developer.github.com/v3/#oauth2-token-sent-in-a-header
+    .replace(/\baccess_token=\w+/g, "access_token=[REDACTED]");
+    this.request = requestCopy;
+  }
+
+}
+
+exports.RequestError = RequestError;
+//# sourceMappingURL=index.js.map
+
+
+/***/ }),
+
 /***/ 510:
 /***/ (function(module) {
 
@@ -7545,7 +8013,7 @@ function hasFirstPage (link) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const url = __webpack_require__(835);
 const http = __webpack_require__(605);
-const https = __webpack_require__(211);
+const https = __webpack_require__(34);
 const pm = __webpack_require__(950);
 let tunnel;
 var HttpCodes;
@@ -7571,6 +8039,7 @@ var HttpCodes;
     HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
     HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
     HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
+    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
     HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
     HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
     HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
@@ -8075,6 +8544,36 @@ function hasPreviousPage (link) {
 
 /***/ }),
 
+/***/ 562:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var osName = _interopDefault(__webpack_require__(2));
+
+function getUserAgent() {
+  try {
+    return `Node.js/${process.version.substr(1)} (${osName()}; ${process.arch})`;
+  } catch (error) {
+    if (/wmic os get Caption/.test(error.message)) {
+      return "Windows <version undetectable>";
+    }
+
+    return "<environment undetectable>";
+  }
+}
+
+exports.getUserAgent = getUserAgent;
+//# sourceMappingURL=index.js.map
+
+
+/***/ }),
+
 /***/ 563:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -8316,6 +8815,31 @@ module.exports = require("path");
 /***/ (function(module) {
 
 module.exports = require("net");
+
+/***/ }),
+
+/***/ 639:
+/***/ (function(__unusedmodule, exports) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+var Action;
+(function (Action) {
+    Action[Action["IssueOpened"] = 1] = "IssueOpened";
+    Action[Action["IssueAssignment"] = 2] = "IssueAssignment";
+    Action[Action["IssueClosed"] = 3] = "IssueClosed";
+    Action[Action["IssueReopened"] = 4] = "IssueReopened";
+    Action[Action["IssueLabeling"] = 5] = "IssueLabeling";
+    Action[Action["PrOpened"] = 6] = "PrOpened";
+    Action[Action["PrClosed"] = 7] = "PrClosed";
+})(Action = exports.Action || (exports.Action = {}));
+var ActionType;
+(function (ActionType) {
+    ActionType[ActionType["Issue"] = 1] = "Issue";
+    ActionType[ActionType["PullRequest"] = 2] = "PullRequest";
+})(ActionType = exports.ActionType || (exports.ActionType = {}));
+
 
 /***/ }),
 
@@ -8658,12 +9182,12 @@ Object.defineProperty(exports, '__esModule', { value: true });
 function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
 
 var endpoint = __webpack_require__(385);
-var universalUserAgent = __webpack_require__(796);
+var universalUserAgent = __webpack_require__(211);
 var isPlainObject = _interopDefault(__webpack_require__(696));
 var nodeFetch = _interopDefault(__webpack_require__(454));
 var requestError = __webpack_require__(463);
 
-const VERSION = "5.3.1";
+const VERSION = "5.3.4";
 
 function getBufferResponse(response) {
   return response.arrayBuffer();
@@ -8693,7 +9217,7 @@ function fetchWrapper(requestOptions) {
 
     if (status === 204 || status === 205) {
       return;
-    } // GitHub API returns 200 for HEAD requsets
+    } // GitHub API returns 200 for HEAD requests
 
 
     if (requestOptions.method === "HEAD") {
@@ -8724,7 +9248,7 @@ function fetchWrapper(requestOptions) {
         try {
           let responseBody = JSON.parse(error.message);
           Object.assign(error, responseBody);
-          let errors = responseBody.errors; // Assumption `errors` would always be in Array Fotmat
+          let errors = responseBody.errors; // Assumption `errors` would always be in Array format
 
           error.message = error.message + ": " + errors.map(JSON.stringify).join(", ");
         } catch (e) {// ignore, see octokit/rest.js#684
@@ -25130,6 +25654,113 @@ module.exports.shellSync = (cmd, opts) => handleShell(module.exports.sync, cmd, 
 
 /***/ }),
 
+/***/ 961:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const core_1 = __webpack_require__(470);
+const issue_1 = __webpack_require__(163);
+class PullRequest {
+    constructor(octokit, url) {
+        this.octokit = octokit;
+        this.url = url;
+        this.id = '';
+        this.number = 0;
+        this.referencedIssues = [];
+        this.repository = '';
+    }
+    /**
+     * Load data for an issue and its containing project and repo
+     */
+    load() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const query = `
+      {
+        resource(url: "${this.url}") {
+          ... on PullRequest {
+            id
+            number
+            repository {
+              nameWithOwner
+            }
+            timelineItems(first: 10, itemTypes: CROSS_REFERENCED_EVENT) {
+              nodes {
+                ... on CrossReferencedEvent {
+                  source {
+                    ... on Issue {
+                      id
+                      url
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+            const response = yield this.octokit.graphql(query);
+            const resource = response['resource'];
+            this.id = resource.id;
+            this.number = resource.number;
+            this.repository = resource.repository.nameWithOwner;
+            this.referencedIssues = resource.timelineItems.nodes.map((node) => (Object.assign({}, node.source)));
+        });
+    }
+    /**
+     * Find all issues in the given project linked to this PR
+     */
+    findLinkedIssues(projectName) {
+        return __awaiter(this, void 0, void 0, function* () {
+            core_1.info(`Finding issues linked to PR ${this.number}`);
+            // Find all open issues linked to PRs by a closing reference
+            const query = `
+      {
+        search(query: "linked:pr is:open type:issue repo:${this.repository}", type: ISSUE, first: 50) {
+          nodes {
+            ... on Issue {
+              url
+            }
+          }
+        }
+      }
+    `;
+            const response = yield this.octokit.graphql(query);
+            const issueUrls = response.search.nodes.map((node) => node.url);
+            const issues = [];
+            for (const url of issueUrls) {
+                core_1.info(`Loading issue ${url}`);
+                issues.push(yield issue_1.loadIssue(this.octokit, url, projectName));
+            }
+            return issues.filter((issue) => issue.projectCard != null &&
+                issue.linkedPrs.some((pr) => pr.id === this.id));
+        });
+    }
+}
+exports.PullRequest = PullRequest;
+function loadPr(octokit, url) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const pr = new PullRequest(octokit, url);
+        yield pr.load();
+        return pr;
+    });
+}
+exports.loadPr = loadPr;
+
+
+/***/ }),
+
 /***/ 966:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -25185,6 +25816,91 @@ module.exports = options => {
 
 	return stream;
 };
+
+
+/***/ }),
+
+/***/ 967:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+const core_1 = __webpack_require__(470);
+const types_1 = __webpack_require__(639);
+function getAction(context) {
+    const event = context.eventName;
+    let action = undefined;
+    let actionType = undefined;
+    if (event === 'issues') {
+        actionType = types_1.ActionType.Issue;
+        const payload = context.payload;
+        switch (payload.action) {
+            case 'opened':
+                action = types_1.Action.IssueOpened;
+                break;
+            case 'closed':
+                action = types_1.Action.IssueClosed;
+                break;
+            case 'reopened':
+                action = types_1.Action.IssueReopened;
+                break;
+            case 'assigned':
+            case 'unassigned':
+                action = types_1.Action.IssueAssignment;
+                break;
+            case 'labeled':
+            case 'unlabeled':
+                action = types_1.Action.IssueLabeling;
+                break;
+        }
+    }
+    else if (event === 'pull_request') {
+        actionType = types_1.ActionType.PullRequest;
+        const payload = context.payload;
+        switch (payload.action) {
+            // Treat opened and reopened PRs the same
+            case 'opened':
+            case 'reopened':
+                action = types_1.Action.PrOpened;
+                break;
+            case 'closed':
+                action = types_1.Action.PrClosed;
+                break;
+        }
+    }
+    return { action, actionType };
+}
+exports.getAction = getAction;
+function getConfig() {
+    const triagedLabels = core_1.getInput('triaged-labels');
+    const config = {
+        token: core_1.getInput('github-token'),
+        projectName: core_1.getInput('project'),
+        // If true, automatically add all new issues to the project
+        autoAdd: core_1.getInput('auto-add'),
+        // Column for new issues
+        triageColumnName: core_1.getInput('triage-column'),
+        // Label that will be applied to triage issues
+        triageLabel: core_1.getInput('triage-label'),
+        // Labels that indicate an issue has been triaged
+        triagedLabels: triagedLabels ? triagedLabels.split(/\s*,\s*/) : null,
+        // Column for "ready" issues
+        todoColumnName: core_1.getInput('todo-column'),
+        // Column for "in-progress" issues
+        workingColumnName: core_1.getInput('working-column'),
+        // Column for completed issues
+        doneColumnName: core_1.getInput('done-column'),
+    };
+    if (!config.token) {
+        throw new Error('A "github-token" property is required');
+    }
+    if (!config.projectName) {
+        throw new Error('A "project" property is required');
+    }
+    return config;
+}
+exports.getConfig = getConfig;
 
 
 /***/ }),
