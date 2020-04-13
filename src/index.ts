@@ -54,6 +54,9 @@ async function main() {
             if (config.triageColumnName) {
               info(`Moving issue ${issue.number} to triage column`);
               await issue.moveToColumn(config.triageColumnName);
+            } else if (config.workingColumnName) {
+              info(`Moving issue ${issue.number} to working column`);
+              await issue.moveToColumn(config.workingColumnName);
             }
           }
           break;
