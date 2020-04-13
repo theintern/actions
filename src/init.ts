@@ -53,6 +53,8 @@ export function getAction(
 }
 
 export function getConfig() {
+  const triagedLabels = getInput('triaged-labels');
+
   const config = {
     token: getInput('github-token'),
     projectName: getInput('project'),
@@ -62,6 +64,9 @@ export function getConfig() {
     triageColumnName: getInput('triage-column'),
     // Label that will be applied to triage issues
     triageLabel: getInput('triage-label'),
+    // A comma separated list of labels that indicate that an issue has already
+    // been triaged
+    triagedLabels: triagedLabels ? triagedLabels.split(/\s*,\s*/) : [],
     // Column for "ready" issues
     todoColumnName: getInput('todo-column'),
     // Column for "in-progress" issues

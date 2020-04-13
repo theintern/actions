@@ -4445,8 +4445,9 @@ function main() {
                 switch (actionInfo.action) {
                     case types_1.Action.IssueOpened:
                         core_1.info(`Issue ${issue.number} was opened`);
-                        if (issue.isAssigned()) {
-                            core_1.info(`Issue ${issue.number} is assigned`);
+                        if (issue.isAssigned() ||
+                            config.triagedLabels.some((lbl) => issue.hasLabel(lbl))) {
+                            core_1.info(`Issue ${issue.number} is assigned or has triage labels`);
                             if (config.workingColumnName) {
                                 // If the issue is already assigned, move it to the working column
                                 core_1.info(`Moving issue ${issue.number} to working column`);
@@ -25854,6 +25855,7 @@ function getAction(context) {
 }
 exports.getAction = getAction;
 function getConfig() {
+    const triagedLabels = core_1.getInput('triaged-labels');
     const config = {
         token: core_1.getInput('github-token'),
         projectName: core_1.getInput('project'),
@@ -25863,6 +25865,9 @@ function getConfig() {
         triageColumnName: core_1.getInput('triage-column'),
         // Label that will be applied to triage issues
         triageLabel: core_1.getInput('triage-label'),
+        // A comma separated list of labels that indicate that an issue has already
+        // been triaged
+        triagedLabels: triagedLabels ? triagedLabels.split(/\s*,\s*/) : [],
         // Column for "ready" issues
         todoColumnName: core_1.getInput('todo-column'),
         // Column for "in-progress" issues

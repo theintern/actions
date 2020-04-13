@@ -30,8 +30,11 @@ async function main() {
         case Action.IssueOpened:
           info(`Issue ${issue.number} was opened`);
 
-          if (issue.isAssigned()) {
-            info(`Issue ${issue.number} is assigned`);
+          if (
+            issue.isAssigned() ||
+            config.triagedLabels.some((lbl) => issue.hasLabel(lbl))
+          ) {
+            info(`Issue ${issue.number} is assigned or has triage labels`);
 
             if (config.workingColumnName) {
               // If the issue is already assigned, move it to the working column

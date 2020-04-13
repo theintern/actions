@@ -31,16 +31,17 @@ jobs:
 
 ## Configuration
 
-| Property         | Required | Value                                                       |
-| ---------------- | -------- | ----------------------------------------------------------- |
-| `github-token`   | Yes      | A GitHub API token (`GITHUB_TOKEN` is available by default) |
-| `project`        | Yes      | The project being managed                                   |
-| `auto-add`       | No       | If true, all new issues are added to the project            |
-| `triage-column`  | No       | Column name for new, unassigned issues                      |
-| `triage-label`   | No       | Label to apply to new issues                                |
-| `todo-column`    | No       | Column name for triaged issues                              |
-| `working-column` | No       | Column name for in-progress issues                          |
-| `done-column`    | No       | Column name for completed issues                            |
+| Property         | Required | Value                                                                                           |
+| ---------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `github-token`   | Yes      | A GitHub API token (`GITHUB_TOKEN` is available by default)                                     |
+| `project`        | Yes      | The project being managed                                                                       |
+| `auto-add`       | No       | If true, all new issues are added to the project                                                |
+| `triage-column`  | No       | Column name for new, unassigned issues                                                          |
+| `triage-label`   | No       | Label to apply to new issues                                                                    |
+| `triaged-labels` | No       | A comma separated list of labels; the presence of any of them marks an issue as already-triaged |
+| `todo-column`    | No       | Column name for triaged issues                                                                  |
+| `working-column` | No       | Column name for in-progress issues                                                              |
+| `done-column`    | No       | Column name for completed issues                                                                |
 
 ## How it works
 
@@ -53,7 +54,8 @@ executed if that property is defined.
 Rules:
 
 - If `auto-add` is true, new issues will be added to `triage-column` and have
-  `triage-label` set
+  `triage-label` set, unless an issue has a label in `triaged-labels`, in which
+  case it will be moved to `todo-column`
 - Issues in `triage-column` will be moved to `todo-column` when `triage-label`
   is removed
 - Issues that are in `todo-column` or `triage-column` will be moved to
