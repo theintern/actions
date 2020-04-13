@@ -4466,6 +4466,10 @@ function main() {
                                 core_1.info(`Moving issue ${issue.number} to triage column`);
                                 yield issue.moveToColumn(config.triageColumnName);
                             }
+                            else if (config.workingColumnName) {
+                                core_1.info(`Moving issue ${issue.number} to working column`);
+                                yield issue.moveToColumn(config.workingColumnName);
+                            }
                         }
                         break;
                     case types_1.Action.IssueClosed:

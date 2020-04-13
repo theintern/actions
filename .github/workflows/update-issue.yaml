@@ -1,0 +1,19 @@
+name: Update issue
+
+on:
+  issues:
+  pull_request:
+    types: [opened, closed, reopened]
+
+jobs:
+  update-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: theintern/action-project-manager@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          project: Development
+          auto-add: true
+          todo-column: To do
+          working-column: In progress
+          done-column: Done
