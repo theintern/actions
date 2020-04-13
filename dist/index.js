@@ -4445,17 +4445,24 @@ function main() {
                 switch (actionInfo.action) {
                     case types_1.Action.IssueOpened:
                         core_1.info(`Issue ${issue.number} was opened`);
-                        if (issue.isAssigned() ||
-                            config.triagedLabels.some((lbl) => issue.hasLabel(lbl))) {
-                            core_1.info(`Issue ${issue.number} is assigned or has triage labels`);
+                        if (issue.isAssigned()) {
+                            core_1.info(`Issue ${issue.number} is assigned`);
                             if (config.workingColumnName) {
                                 // If the issue is already assigned, move it to the working column
                                 core_1.info(`Moving issue ${issue.number} to working column`);
                                 yield issue.moveToColumn(config.workingColumnName);
                             }
                         }
+                        else if (config.triagedLabels.some((lbl) => issue.hasLabel(lbl))) {
+                            core_1.info(`Issue ${issue.number} has already been triaged`);
+                            if (config.todoColumnName) {
+                                // If the issue is already assigned, move it to the working column
+                                core_1.info(`Moving issue ${issue.number} to todo column`);
+                                yield issue.moveToColumn(config.todoColumnName);
+                            }
+                        }
                         else {
-                            core_1.info(`Issue ${issue.number} is not assigned`);
+                            core_1.info(`Issue ${issue.number} is not assigned or triaged`);
                             // If we have a triage label, apply it to new issues
                             if (config.triageLabel) {
                                 core_1.info(`Adding triage label to ${issue.number}`);
