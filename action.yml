@@ -3,3 +3,28 @@ description: 'Move issues around in projects'
 runs:
     using: 'node12'
     main: 'dist/index.js'
+inputs:
+    github-token:
+        description: A GitHub auth token
+        required: true
+    project:
+        description: The name of the project to manage
+        required: true
+    auto-add:
+        description: If true, automatically add new issues to the project board
+        required: false
+    done-column:
+        description: The name of a column for completed issues
+        required: false
+    todo-column:
+        description: The name of a column for todo issues
+        required: false
+    triage-column:
+        description: The name of a column for issues that need to be triaged
+        required: false
+    triaged-labels:
+        description: A comma separated list of labels that indicate that an issue has already been triaged
+        required: false
+    working-column:
+        description: The name of a column for in-progress issues
+        required: false
